@@ -4,8 +4,7 @@
 # Script Name: mediagram
 # Description:
 # This script provides an interactive terminal-based interface to search,
-# download and play YouTube videos using `yt-dlp` and `mpv.`
-#
+# download and play YouTube videos using `yt-dlp` and `mpv.
 # Features:
 # - Search for YouTube videos or playlists with dynamic toggles.
 # - Supports audio-only or video playback modes.
@@ -15,7 +14,7 @@
 #
 # Attribution:
 # Implemented via GPT by Page Telegram services for a better world.
-# Version: v1.0 
+# Version: v1.1 (added audio device 'default' option; also now redraws menu after song)
 # Date: December 2024
 # -------------------------------------------------------------------------
 
@@ -185,8 +184,11 @@ save_state() {
         echo "AUDIO_ONLY_MODE=$AUDIO_ONLY_MODE"
     } > "$STATE_FILE"
 }
-
 detect_audio_devices() {
+    # Add the "Default" option first
+    AUDIO_DEVICES=("default")
+
+    # Detect ALSA devices and append them to the list
     while IFS= read -r line; do
         if [[ $line =~ ^card[[:space:]]+([0-9]+):.*device[[:space:]]+([0-9]+): ]]; then
             card="${BASH_REMATCH[1]}"
@@ -195,14 +197,17 @@ detect_audio_devices() {
         fi
     done < <(aplay -l 2>/dev/null)
 
-    if [ "${#AUDIO_DEVICES[@]}" -eq 0 ]; then
-        AUDIO_DEVICES=("hw:0,0")
+    # Fallback if no ALSA devices are found
+    if [ "${#AUDIO_DEVICES[@]}" -eq 1 ]; then
+        AUDIO_DEVICES+=("hw:0,0")
     fi
 }
-
 get_audio_device_string() {
-    # Use a map for ALSA devices if "hw:X,Y" is required
-    echo "alsa/plughw:${AUDIO_DEVICES[$AUDIO_DEVICE_INDEX]#hw:}"
+    if [ "${AUDIO_DEVICES[$AUDIO_DEVICE_INDEX]}" == "default" ]; then
+        echo "default"
+    else
+        echo "${AUDIO_DEVICES[$AUDIO_DEVICE_INDEX]}"
+    fi
 }
 
 
@@ -212,7 +217,6 @@ play_beep() {
         aplay -D "$dev" "$BEEP_FILE" >/dev/null 2>&1
     fi
 }
-
 play_with_mpv() {
     # $1: Extra arguments (like --shuffle)
     # $2..: Files or URLs
@@ -222,9 +226,11 @@ play_with_mpv() {
 
     local mpv_args=()
 
-    # Specify audio device using --audio-device
+    # Add --audio-device only if not "default"
     local audio_device="$(get_audio_device_string)"
-    mpv_args+=("--audio-device=$audio_device")
+    if [ "$audio_device" != "default" ]; then
+        mpv_args+=("--audio-device=$audio_device")
+    fi
 
     # Disable video if in audio-only mode
     if $AUDIO_ONLY_MODE; then
@@ -281,7 +287,12 @@ perform_search() {
 }
 
 draw_results_menu() {
+	
     clear
+
+clear
+
+
 
     local start_index=$((PAGE * RESULTS_PER_PAGE))
     local end_index=$((start_index + RESULTS_PER_PAGE - 1))
@@ -301,7 +312,11 @@ draw_results_menu() {
     echo "Site: $SITE   > ------- > by Page Telegram service for a better world. < -----"
     echo "Query: '$QUERY'"
     echo "Mode (SearchType): $SEARCH_TYPE"
-    echo "Audio Device: $(get_audio_device_string)"
+#    echo "Audio Device: $(get_audio_device_string)"
+        # Display the current audio device
+    local audio_device="$(get_audio_device_string)"
+    echo "Audio Device: $audio_device"
+
     echo "Audio-only mode: $AUDIO_ONLY_MODE"
     echo "Page $page_num, $disp_start-$disp_end"
     echo "------------------------------------------------------------"
@@ -369,6 +384,7 @@ results_menu() {
                         echo "Playing: ${TITLES[$idx]}"
                         play_with_mpv "" "${URLS[$idx]}"
                     fi
+ draw_results_menu
                     ;;
                 [Ll]) # Shuffle and Play
                     shuffle_and_play_downloads
@@ -395,11 +411,12 @@ results_menu() {
                     draw_results_menu
                     ;;
                 [Cc]) # Cycle Audio Devices
-                    ((AUDIO_DEVICE_INDEX++))
-                    (( AUDIO_DEVICE_INDEX >= ${#AUDIO_DEVICES[@]} )) && AUDIO_DEVICE_INDEX=0
-                    save_state
-                    draw_results_menu
-                    ;;
+    ((AUDIO_DEVICE_INDEX++))
+    (( AUDIO_DEVICE_INDEX >= ${#AUDIO_DEVICES[@]} )) && AUDIO_DEVICE_INDEX=0
+    save_state
+    draw_results_menu
+    ;;
+
                 [Ss]) # New Search
                     new_search_from_results
                     ;;
